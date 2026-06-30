@@ -22,11 +22,30 @@ enum ScreenMode {
   SCREEN_ALT
 };
 
+enum AppState {
+  APP_MENU = 0,
+  APP_PLAYLIST,
+  APP_SETTINGS
+};
+
+enum Instrument {
+  INSTRUMENT_BASS = 0,
+  INSTRUMENT_GUITAR
+};
+
 const char* modeLabel(ScreenMode mode) {
   switch (mode) {
     case SCREEN_MAIN: return "Main";
     case SCREEN_ALT: return "Alt";
     default: return "Main";
+  }
+}
+
+const char* instrumentLabel(Instrument instrument) {
+  switch (instrument) {
+    case INSTRUMENT_BASS: return "Bass";
+    case INSTRUMENT_GUITAR: return "Guitar";
+    default: return "Bass";
   }
 }
 
@@ -85,13 +104,15 @@ String formatSongIndex(uint8_t songIndex, uint8_t totalSongs) {
   return value;
 }
 
-void renderSong(const Song& song, ScreenMode mode, uint8_t songIndex) {
+void renderSong(const Song& song, ScreenMode mode, uint8_t songIndex, Instrument instrument) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.print("PoketStage");
-  display.setCursor(86, 0);
+  display.setCursor(70, 0);
+  display.print(instrumentLabel(instrument));
+  display.setCursor(100, 0);
   display.print(modeLabel(mode));
   display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
 
@@ -133,6 +154,60 @@ void renderSong(const Song& song, ScreenMode mode, uint8_t songIndex) {
   display.display();
 }
 
+void renderMenu(uint8_t selectedItem, Instrument instrument) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print("PoketStage");
+  display.setCursor(86, 0);
+  display.print("Menu");
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+  display.setCursor(0, 20);
+  display.print(selectedItem == 0 ? ">" : " ");
+  display.setCursor(10, 20);
+  display.print("Show Playlist");
+
+  display.setCursor(0, 38);
+  display.print(selectedItem == 1 ? ">" : " ");
+  display.setCursor(10, 38);
+  display.print("Settings");
+
+  display.setCursor(0, 56);
+  display.print("Inst:");
+  display.setCursor(28, 56);
+  display.print(instrumentLabel(instrument));
+
+  display.display();
+}
+
+void renderSettings(Instrument instrument) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print("Settings");
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+  display.setCursor(0, 24);
+  display.print("Instrument:");
+  display.setCursor(0, 38);
+  display.print(instrument == INSTRUMENT_BASS ? ">" : " ");
+  display.setCursor(10, 38);
+  display.print("Bass");
+
+  display.setCursor(0, 50);
+  display.print(instrument == INSTRUMENT_GUITAR ? ">" : " ");
+  display.setCursor(10, 50);
+  display.print("Guitar");
+
+  display.setCursor(0, 56);
+  display.print("Center: back");
+
+  display.display();
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(BTN_LEFT, INPUT_PULLUP);
@@ -156,8 +231,11 @@ void setup() {
 }
 
 void loop() {
+  static AppState appState = APP_MENU;
+  static uint8_t selectedMenuItem = 0;
+  static Instrument selectedInstrument = INSTRUMENT_BASS;
   static uint8_t currentSong = 0;
-  static uint8_t currentView = SCREEN_MAIN;
+  static ScreenMode currentView = SCREEN_MAIN;
   static unsigned long lastInput = 0;
   static bool lastLeft = false;
   static bool lastCenter = false;
@@ -168,15 +246,45 @@ void loop() {
     bool center = digitalRead(BTN_CENTER) == LOW;
     bool right = digitalRead(BTN_RIGHT) == LOW;
 
-    if (left && !lastLeft) {
-      currentSong = (currentSong + kSongCount - 1) % kSongCount;
-      lastInput = millis();
-    } else if (right && !lastRight) {
-      currentSong = (currentSong + 1) % kSongCount;
-      lastInput = millis();
-    } else if (center && !lastCenter) {
-      currentView = (currentView + 1) % 2;
-      lastInput = millis();
+    if (appState == APP_MENU) {
+      if (left && !lastLeft) {
+        selectedMenuItem = (selectedMenuItem + 1) % 2;
+        lastInput = millis();
+      } else if (right && !lastRight) {
+        selectedMenuItem = (selectedMenuItem + 1) % 2;
+        lastInput = millis();
+      } else if (center && !lastCenter) {
+        if (selectedMenuItem == 0) {
+          appState = APP_PLAYLIST;
+          currentSong = 0;
+          currentView = SCREEN_MAIN;
+        } else {
+          appState = APP_SETTINGS;
+        }
+        lastInput = millis();
+      }
+    } else if (appState == APP_PLAYLIST) {
+      if (left && !lastLeft) {
+        currentSong = (currentSong + kSongCount - 1) % kSongCount;
+        lastInput = millis();
+      } else if (right && !lastRight) {
+        currentSong = (currentSong + 1) % kSongCount;
+        lastInput = millis();
+      } else if (center && !lastCenter) {
+        currentView = static_cast<ScreenMode>((currentView + 1) % 2);
+        lastInput = millis();
+      }
+    } else if (appState == APP_SETTINGS) {
+      if (left && !lastLeft) {
+        selectedInstrument = static_cast<Instrument>((selectedInstrument + 1) % 2);
+        lastInput = millis();
+      } else if (right && !lastRight) {
+        selectedInstrument = static_cast<Instrument>((selectedInstrument + 1) % 2);
+        lastInput = millis();
+      } else if (center && !lastCenter) {
+        appState = APP_MENU;
+        lastInput = millis();
+      }
     }
 
     lastLeft = left;
@@ -184,6 +292,13 @@ void loop() {
     lastRight = right;
   }
 
-  renderSong(kSongs[currentSong], static_cast<ScreenMode>(currentView), currentSong);
+  if (appState == APP_MENU) {
+    renderMenu(selectedMenuItem, selectedInstrument);
+  } else if (appState == APP_PLAYLIST) {
+    renderSong(kSongs[currentSong], currentView, currentSong, selectedInstrument);
+  } else {
+    renderSettings(selectedInstrument);
+  }
+
   delay(100);
 }
